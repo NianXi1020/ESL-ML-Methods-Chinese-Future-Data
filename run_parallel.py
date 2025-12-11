@@ -23,6 +23,13 @@ def build_tasks(
     if candidate_C is None:
         candidate_C = [0.0001, 0.001, 0.01, 0.1, 1.0]
 
+    # Provide a light-weight default grid for random forest when none is given
+    if param_grid is None and model_name.lower() == "rf":
+        param_grid = [
+            {"n_estimators": 200, "max_depth": None, "max_features": "sqrt"},
+            {"n_estimators": 400, "max_depth": 6, "max_features": "sqrt"},
+        ]
+
     run_cfg = ContractRunConfig(
         candidate_C=candidate_C,
         model_name=model_name,
@@ -53,7 +60,7 @@ def main():
         output_root=output_root,
         max_contracts=5,
         candidate_C=[0.0001, 0.001, 0.01, 0.1, 1.0],
-        model_name="logit",
+        model_name="rf",
         start_date="2014-01-01",
         end_date="2018-12-31",
         nrows_per_file=None,
