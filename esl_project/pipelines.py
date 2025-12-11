@@ -57,6 +57,10 @@ def run_single_contract(
     df_feat = add_feature_columns(df_raw)
     df_labeled = prepare_labeled_data(df_feat, alpha=run_cfg.alpha)
 
+    # Drop any rows that still contain NaNs in the active feature set or label
+    cols_to_check = list(run_cfg.feature_list) + ["label"]
+    df_labeled = df_labeled.dropna(subset=cols_to_check).reset_index(drop=True)
+
     if df_labeled.empty:
         return {
             "contract": contract_name,
