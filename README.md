@@ -163,7 +163,13 @@ The notebook supports **multi-contract training** as follows:
     - Loads data for that contract.
     - Builds features + labels.
     - Runs the full training + evaluation pipeline independently.
-  - Outputs are organized by **contract-specific subfolders** under the run’s timestamp.
+- Outputs are organized by **contract-specific subfolders** under the run’s timestamp.
+
+### Modular Python package and parallel runner
+
+- Core reusable code now lives in `esl_project/` (data loading, feature engineering, model loader, evaluation).
+- Additional models can be registered via `esl_project/model_loader.py` (currently supports `logit`, `svm`, `rf`, `xgb`).
+- `run_parallel.py` launches multi-contract jobs in parallel and writes results to `outputs_parallel/ESL_run_<timestamp>/<TAG>/metrics|figures` with filenames that include both the contract tag and model name (e.g., `AG_logit_rolling_metrics.csv`).
 
 Example directory structure:
 

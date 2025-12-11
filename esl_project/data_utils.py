@@ -6,6 +6,8 @@ from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 
 # Baseline feature set shared by the pipeline and notebooks
@@ -121,6 +123,13 @@ def add_feature_columns(
     return df
 
 
+def downsample_time_series(df: pd.DataFrame, step: int = 1) -> pd.DataFrame:
+    """Simple downsampling by row stride while preserving time order."""
+    if step <= 1:
+        return df
+    return df.iloc[::step].reset_index(drop=True)
+
+
 # -----------------------------
 # Label creation and alignment
 # -----------------------------
@@ -176,3 +185,36 @@ def rolling_month_windows(
             test_slice.astype(str).tolist(),
         )
         start += 1
+
+
+def select_features_with_l1(
+    df: pd.DataFrame,
+    feature_list: List[str],
+    label_col: str = "label",
+    C: float = 0.1,
+    max_iter: int = 500,
+    tol: float = 1e-4,
+) -> List[str]:
+    """Use L1-regularized logistic regression to pick a sparse feature subset."""
+    X_df = get_feature_matrix(df, feature_list)
+    y = df[label_col].astype(int)
+
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X_df)
+
+    model = LogisticRegression(
+        penalty="l1",
+        solver="saga",
+        C=C,
+        class_weight=None,
+        multi_class="multinomial",
+        max_iter=max_iter,
+        tol=tol,
+        n_jobs=-1,
+    )
+    model.fit(X, y)
+
+    coef_matrix = np.abs(model.coef_)
+    keep_mask = coef_matrix.max(axis=0) > 1e-6
+    selected = [feat for feat, keep in zip(feature_list, keep_mask) if keep]
+    return selected

@@ -21,19 +21,22 @@ def compute_class_weights(y: Iterable[int]) -> Dict[int, float]:
     return {cls: val / total for cls, val in inv.items()}
 
 
-def evaluate_c_grid(
+def evaluate_model_grid(
     df: pd.DataFrame,
-    C_values: List[float],
+    model_name: str,
+    param_grid: List[Dict[str, object]],
     feature_list: List[str],
     train_months: int = 12,
     test_months: int = 1,
     metric_dir: Optional[Path] = None,
+    tag: Optional[str] = None,
 ) -> Dict[str, object]:
-    """Evaluate a grid of C values with rolling windows and return the best result."""
-    c_rows: List[Dict[str, float]] = []
-    per_c_results: Dict[float, Dict[str, object]] = {}
+    """Evaluate a hyperparameter grid with rolling windows and return the best result."""
 
-    for C in C_values:
+    grid_rows: List[Dict[str, float]] = []
+    per_result: Dict[int, Dict[str, object]] = {}
+
+    for idx, params in enumerate(param_grid):
         fold_metrics: List[Dict[str, float]] = []
         preds: List[pd.DataFrame] = []
         conf_mats: List[np.ndarray] = []
@@ -51,14 +54,10 @@ def evaluate_c_grid(
             X_test = scaler.transform(X_test_df)
 
             class_weights = compute_class_weights(y_train)
-            config = ModelConfig(
-                model_name="logit",
-                params={
-                    "C": C,
-                    "class_weight": class_weights,
-                    "n_jobs": -1,
-                },
-            )
+            merged_params = dict(params)
+            merged_params.setdefault("class_weight", class_weights)
+
+            config = ModelConfig(model_name=model_name, params=merged_params)
             model = train_model(X_train, y_train, config)
 
             y_pred = model.predict(X_test)
@@ -104,39 +103,43 @@ def evaluate_c_grid(
 
         metrics_df = pd.DataFrame(fold_metrics)
         avg_row = {
-            "C": C,
+            "param_index": idx,
             "avg_accuracy": metrics_df["accuracy"].mean(),
             "avg_f1_macro": metrics_df["f1_macro"].mean(),
             "avg_precision_pos": metrics_df["precision_pos"].mean(),
             "avg_precision_neg": metrics_df["precision_neg"].mean(),
         }
-        c_rows.append(avg_row)
+        grid_rows.append(avg_row)
 
-        per_c_results[C] = {
+        per_result[idx] = {
             "metrics": metrics_df,
             "predictions": pd.concat(preds, ignore_index=True),
             "confusions": conf_mats,
         }
 
-    summary_df = pd.DataFrame(c_rows)
+    summary_df = pd.DataFrame(grid_rows)
     summary_df = summary_df.sort_values(["avg_f1_macro", "avg_accuracy"], ascending=False)
-    best_C = summary_df.iloc[0]["C"]
+    best_idx = int(summary_df.iloc[0]["param_index"])
 
     if metric_dir is not None:
         metric_dir.mkdir(parents=True, exist_ok=True)
-        summary_df.to_csv(metric_dir / "c_grid_summary.csv", index=False)
+        name_prefix = f"{tag}_{model_name}" if tag else model_name
+        summary_df.to_csv(metric_dir / f"{name_prefix}_grid_summary.csv", index=False)
 
-    chosen = per_c_results[best_C]
+    chosen = per_result[best_idx]
     agg_conf = sum(chosen["confusions"])
     if metric_dir is not None:
-        chosen["metrics"].to_csv(metric_dir / f"rolling_metrics_C{best_C}.csv", index=False)
-        chosen["predictions"].to_csv(metric_dir / f"predictions_C{best_C}.csv", index=False)
+        name_prefix = f"{tag}_{model_name}" if tag else model_name
+        chosen["metrics"].to_csv(metric_dir / f"{name_prefix}_rolling_metrics.csv", index=False)
+        chosen["predictions"].to_csv(metric_dir / f"{name_prefix}_predictions.csv", index=False)
         pd.DataFrame(agg_conf, index=[-1, 0, 1], columns=[-1, 0, 1]).to_csv(
-            metric_dir / f"confusion_C{best_C}.csv"
+            metric_dir / f"{name_prefix}_confusion.csv"
         )
 
+    best_params = param_grid[best_idx]
     return {
-        "best_C": best_C,
+        "best_params": best_params,
+        "best_index": best_idx,
         "summary": summary_df,
         "rolling_metrics": chosen["metrics"],
         "predictions": chosen["predictions"],

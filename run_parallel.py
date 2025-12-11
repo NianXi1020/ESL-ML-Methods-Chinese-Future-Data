@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import List, Tuple
@@ -13,6 +14,8 @@ def build_tasks(
     output_root: Path,
     max_contracts: int = 5,
     candidate_C: List[float] = None,
+    model_name: str = "logit",
+    param_grid: List[dict] | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     nrows_per_file: int | None = None,
@@ -20,7 +23,11 @@ def build_tasks(
     if candidate_C is None:
         candidate_C = [0.0001, 0.001, 0.01, 0.1, 1.0]
 
-    run_cfg = ContractRunConfig(candidate_C=candidate_C)
+    run_cfg = ContractRunConfig(
+        candidate_C=candidate_C,
+        model_name=model_name,
+        param_grid=param_grid,
+    )
     load_cfg = DataLoadConfig(
         data_dir=data_dir,
         max_files=max_contracts,
@@ -37,7 +44,8 @@ def run_task(args):
 
 def main():
     data_dir = Path("2005年__20250905")
-    output_root = Path("outputs_parallel") / "run"
+    run_dir = Path("outputs_parallel") / f"ESL_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    output_root = run_dir
     output_root.mkdir(parents=True, exist_ok=True)
 
     tasks = build_tasks(
@@ -45,6 +53,7 @@ def main():
         output_root=output_root,
         max_contracts=5,
         candidate_C=[0.0001, 0.001, 0.01, 0.1, 1.0],
+        model_name="logit",
         start_date="2014-01-01",
         end_date="2018-12-31",
         nrows_per_file=None,
@@ -55,7 +64,9 @@ def main():
         results = pool.map(run_task, tasks)
 
     for res in results:
-        print(f"Contract {res.get('contract')} finished; best C={res.get('best_C')}")
+        print(
+            f"Contract {res.get('contract')} finished; best params={res.get('best_params')}"
+        )
 
 
 if __name__ == "__main__":
