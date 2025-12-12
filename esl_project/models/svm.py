@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 import numpy as np
 from sklearn.svm import LinearSVC
+from threadpoolctl import threadpool_limits
 
 
 def train_svm(
@@ -17,10 +18,12 @@ def train_svm(
     **kwargs: Any,
 ) -> LinearSVC:
     """Train a linear SVM classifier with multi-core support via liblinear."""
-    # n_jobs is passed directly so liblinear can parallelize one-vs-rest fits
-    # (available in scikit-learn >=1.3). Fall back to setting the attribute for
-    # compatibility with slightly older versions that still honor the field.
-    model = LinearSVC(
+    # Explicitly control thread usage via threadpoolctl so liblinear can
+    # parallelize across CPU cores even though LinearSVC itself does not expose
+    # an n_jobs argument in this sklearn version.
+    limits = None if n_jobs in (-1, None) else n_jobs
+
+    linear_kwargs = dict(
         C=C,
         class_weight=class_weight,
         dual=True,
@@ -29,11 +32,11 @@ def train_svm(
         max_iter=max_iter,
         fit_intercept=True,
         random_state=42,
-        n_jobs=n_jobs,
-        **kwargs,
     )
-    if not hasattr(model, "n_jobs"):
-        model.n_jobs = n_jobs
+    linear_kwargs.update(kwargs)
+    linear_kwargs.pop("n_jobs", None)
 
-    model.fit(X_train, y_train)
+    with threadpool_limits(limits=limits):
+        model = LinearSVC(**linear_kwargs)
+        model.fit(X_train, y_train)
     return model
