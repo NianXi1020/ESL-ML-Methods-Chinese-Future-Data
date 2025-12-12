@@ -13,10 +13,13 @@ def train_svm(
     class_weight: Optional[dict[str, float]] = None,
     n_jobs: int = -1,
     tol: float = 1e-3,
-    max_iter: int = 2000,
+    max_iter: int = 5000,
     **kwargs: Any,
 ) -> LinearSVC:
     """Train a linear SVM classifier with multi-core support via liblinear."""
+    # n_jobs is passed directly so liblinear can parallelize one-vs-rest fits
+    # (available in scikit-learn >=1.3). Fall back to setting the attribute for
+    # compatibility with slightly older versions that still honor the field.
     model = LinearSVC(
         C=C,
         class_weight=class_weight,
@@ -26,11 +29,10 @@ def train_svm(
         max_iter=max_iter,
         fit_intercept=True,
         random_state=42,
+        n_jobs=n_jobs,
         **kwargs,
     )
-    # LinearSVC exposes n_jobs starting from scikit-learn 1.3;
-    # set the attribute if available to unlock multi-core training.
-    if hasattr(model, "n_jobs"):
+    if not hasattr(model, "n_jobs"):
         model.n_jobs = n_jobs
 
     model.fit(X_train, y_train)
