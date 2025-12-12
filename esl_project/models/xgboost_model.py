@@ -29,6 +29,7 @@ def train_xgboost(
         reg_lambda=reg_lambda,
         n_jobs=n_jobs,
         objective="multi:softprob",
+        num_class=3,
         eval_metric="mlogloss",
         **kwargs,
     )

@@ -46,30 +46,58 @@ def evaluate_model_grid(
         ):
             X_train_df = get_feature_matrix(train_df, feature_list)
             X_test_df = get_feature_matrix(test_df, feature_list)
-            y_train = train_df["label"].astype(int)
-            y_test = test_df["label"].astype(int)
+            y_train_orig = train_df["label"].astype(int)
+            y_test_orig = test_df["label"].astype(int)
+
+            # XGBoost expects labels starting at 0..K-1; map for training and map back for metrics
+            if model_name == "xgb":
+                encode_map = {-1: 0, 0: 1, 1: 2}
+                decode_map = {v: k for k, v in encode_map.items()}
+                y_train = y_train_orig.map(encode_map)
+                y_test = y_test_orig.map(encode_map)
+            else:
+                y_train = y_train_orig
+                y_test = y_test_orig
 
             scaler = StandardScaler()
             X_train = scaler.fit_transform(X_train_df)
             X_test = scaler.transform(X_test_df)
 
-            class_weights = compute_class_weights(y_train)
+            class_weights = compute_class_weights(y_train_orig)
             merged_params = dict(params)
-            merged_params.setdefault("class_weight", class_weights)
+            if model_name != "xgb":
+                merged_params.setdefault("class_weight", class_weights)
+            else:
+                merged_params.pop("class_weight", None)
 
             config = ModelConfig(model_name=model_name, params=merged_params)
             model = train_model(X_train, y_train, config)
 
-            y_pred = model.predict(X_test)
-            if hasattr(model, "predict_proba"):
-                prob = model.predict_proba(X_test)
-            else:
-                prob = np.zeros((len(y_pred), len(np.unique(y_train))))
+            y_pred_enc = model.predict(X_test)
 
-            acc = accuracy_score(y_test, y_pred)
-            f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
-            prec_pos = precision_score(y_test, y_pred, labels=[1], average="macro", zero_division=0)
-            prec_neg = precision_score(y_test, y_pred, labels=[-1], average="macro", zero_division=0)
+            # Map predictions/probabilities back to original labels if needed
+            if model_name == "xgb":
+                y_pred = pd.Series(y_pred_enc).map(decode_map).values
+                if hasattr(model, "predict_proba"):
+                    prob_enc = model.predict_proba(X_test)
+                    prob = np.zeros((len(y_pred), 3))
+                    for col_idx, orig_label in enumerate([-1, 0, 1]):
+                        enc_idx = encode_map[orig_label]
+                        if enc_idx < prob_enc.shape[1]:
+                            prob[:, col_idx] = prob_enc[:, enc_idx]
+                else:
+                    prob = np.zeros((len(y_pred), 3))
+            else:
+                y_pred = y_pred_enc
+                if hasattr(model, "predict_proba"):
+                    prob = model.predict_proba(X_test)
+                else:
+                    prob = np.zeros((len(y_pred), len(np.unique(y_train))))
+
+            acc = accuracy_score(y_test_orig, y_pred)
+            f1 = f1_score(y_test_orig, y_pred, average="macro", zero_division=0)
+            prec_pos = precision_score(y_test_orig, y_pred, labels=[1], average="macro", zero_division=0)
+            prec_neg = precision_score(y_test_orig, y_pred, labels=[-1], average="macro", zero_division=0)
 
             fold_metrics.append(
                 {
@@ -85,7 +113,7 @@ def evaluate_model_grid(
                 }
             )
 
-            conf = confusion_matrix(y_test, y_pred, labels=[-1, 0, 1])
+            conf = confusion_matrix(y_test_orig, y_pred, labels=[-1, 0, 1])
             conf_mats.append(conf)
 
             preds.append(
