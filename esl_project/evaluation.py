@@ -5,7 +5,12 @@ from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+)
 from sklearn.preprocessing import StandardScaler
 
 from .data_utils import get_feature_matrix, rolling_month_windows
@@ -76,23 +81,43 @@ def evaluate_model_grid(
             y_pred_enc = model.predict(X_test)
 
             # Map predictions/probabilities back to original labels if needed
+            prob = np.zeros((len(y_pred_enc), 3))
+            score_one = None
             if model_name == "xgb":
                 y_pred = pd.Series(y_pred_enc).map(decode_map).values
                 if hasattr(model, "predict_proba"):
                     prob_enc = model.predict_proba(X_test)
-                    prob = np.zeros((len(y_pred), 3))
                     for col_idx, orig_label in enumerate([-1, 0, 1]):
                         enc_idx = encode_map[orig_label]
                         if enc_idx < prob_enc.shape[1]:
                             prob[:, col_idx] = prob_enc[:, enc_idx]
-                else:
-                    prob = np.zeros((len(y_pred), 3))
             else:
                 y_pred = y_pred_enc
                 if hasattr(model, "predict_proba"):
-                    prob = model.predict_proba(X_test)
-                else:
-                    prob = np.zeros((len(y_pred), len(np.unique(y_train))))
+                    prob_raw = model.predict_proba(X_test)
+                    # Align probability columns to [-1, 0, 1] if possible
+                    if hasattr(model, "classes_"):
+                        cls_list = list(model.classes_)
+                        for idx_cls, lbl in enumerate(cls_list):
+                            if lbl in [-1, 0, 1]:
+                                target_idx = [-1, 0, 1].index(lbl)
+                                if target_idx < prob_raw.shape[1]:
+                                    prob[:, target_idx] = prob_raw[:, idx_cls]
+                    else:
+                        prob[:, : prob_raw.shape[1]] = prob_raw
+                elif hasattr(model, "decision_function"):
+                    scores = model.decision_function(X_test)
+                    if scores.ndim == 1:
+                        score_one = scores
+                    else:
+                        # Map decision scores to class +1 if present
+                        if hasattr(model, "classes_") and 1 in model.classes_:
+                            score_one = scores[:, list(model.classes_).index(1)]
+                        else:
+                            score_one = scores[:, 0]
+                    # convert decision scores to pseudo probabilities for class 1
+                    if score_one is not None:
+                        prob[:, 2] = 1.0 / (1.0 + np.exp(-score_one))
 
             acc = accuracy_score(y_test_orig, y_pred)
             f1 = f1_score(y_test_orig, y_pred, average="macro", zero_division=0)
@@ -125,6 +150,7 @@ def evaluate_model_grid(
                         "prob_-1": prob[:, 0] if prob.shape[1] > 0 else np.nan,
                         "prob_0": prob[:, 1] if prob.shape[1] > 1 else np.nan,
                         "prob_1": prob[:, 2] if prob.shape[1] > 2 else np.nan,
+                        "score_1": score_one if score_one is not None else np.nan,
                     }
                 )
             )
